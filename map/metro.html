@@ -1,0 +1,244 @@
+
+<!DOCTYPE html>
+<meta charset="utf-8">
+
+<style>
+    /*@import url(mapStyle.css);*/
+    rect {
+    fill: none;
+    pointer-events: all;
+}
+
+.feature {
+    fill: #ccc;
+    cursor: pointer;
+}
+
+ .feature.active {
+     fill: orange;
+ }
+
+.mesh {
+    fill: none;
+    stroke: #fff;
+    stroke-width: .5px;
+    stroke-linejoin: round;
+}
+
+    .csvTable table {
+        border-collapse: collapse;
+        text-align: left;
+        width: 100%;
+    }
+
+    .csvTable {
+        font: normal 12px/150% Arial, Helvetica, sans-serif;
+        background: #fff;
+        overflow: hidden;
+        border: 1px solid #069;
+        -webkit-border-radius: 3px;
+        -moz-border-radius: 3px;
+        border-radius: 3px;
+    }
+
+    .csvTable table td, .csvTable table th {
+        padding: 3px 10px;
+    }
+
+    .csvTable table thead th {
+        background: 0;
+        filter: progid:DXImageTransform.Microsoft.gradient(startColorstr='#006699',endColorstr='#00557F');
+        background-color: #006D2C;
+        color: #FFF;
+        font-size: 15px;
+        font-weight: 700;
+        border-left: 1px solid #0070A8;
+    }
+
+        .csvTable table thead th:first-child {
+            border: none;
+        }
+
+    .csvTable table tbody td {
+        color: #00496B;
+        border-left: 1px solid #E1EEF4;
+        font-size: 12px;
+        border-bottom: 1px solid #E1EEF4;
+        font-weight: 400;
+    }
+
+        .csvTable table tbody td:first-child {
+            border-left: none;
+        }
+
+    .csvTable table tbody tr:last-child td {
+        border-bottom: none;
+    }
+
+    .csvTable tr:hover td {
+        background-color: #069;
+        color: white;
+    }
+</style>
+
+<script src="https://d3js.org/d3.v3.min.js" charset="utf-8"></script>
+
+<body>
+   <!-- Table to hold the Divs -->
+   <table border="0" cellpadding="10" style="overflow-y: scroll;">
+        <tr>
+            <td><div id="table_container" class="csvTable"></div></td>
+            <td><div id="map_container"></div></td>
+        </tr>
+    </table>
+
+<script>
+
+// Based on http://public.johnnyotoole.fastmail.fm/county_map.html 
+
+// Based on http://bl.ocks.org/mbostock/4699541
+
+//Width and height
+var w = 1000;
+var h = 1000;
+var active;
+var jsonOutside;
+
+//Define map projection NB change to mercator and changed zoom etc
+var projection = d3.geo.mercator()
+    .center([0, 38.5])
+    .rotate([105.6, 0])
+    .scale(8000)
+    .translate([w / 2, h / 2]);
+
+//Define path generator
+var path = d3.geo.path()
+                 .projection(projection);
+
+//Create SVG element
+var svg = d3.select("#map_container")
+            .append("svg")
+            .attr("width", w)
+            .attr("height", h);
+
+// from colorbrewer (http://colorbrewer2.org/)
+var colours = ["#BAE4B3", "#74C476", "#31A354", "#006D2C"]; 
+
+// setup colours for choropleth
+var colScale = d3.scale.ordinal() 
+                  .range(colours);
+
+svg.append("rect")
+    .attr("width", w)
+    .attr("height", h)
+    .on("click", reset);
+
+var g = svg.append("g");
+
+//Load in CSV data
+d3.csv("metro_district_data.csv", function (data) {
+
+    //Load in GeoJSON data
+    d3.json("colorado_metro_districts.json", function (json) {
+
+      // join csv data with json data and create 
+      json.features.forEach(function (d,i) {
+        data.forEach(function (e,j) {
+          if (d.properties.lgid === e.ID) {
+            d.properties.value = +e.Result;
+          };
+        })
+      })
+      
+      jsonOutside = json; // pass json to a global so tableRowClicked has access
+      console.log(jsonOutside);
+
+      var columns = ["ID", "County", "Result"];
+       var table = d3.select("#table_container").append("table"),
+             thead = table.append("thead"),
+             tbody = table.append("tbody");
+     
+       // append the header row
+       thead.append("tr")
+             .selectAll("th")
+             .data(columns)
+             .enter()
+             .append("th")
+             .text(function (column) { return column; });
+     
+         // create a row for each object in the data
+        var rows = tbody.selectAll("tr")
+             .data(data)
+             .enter()
+             .append("tr");
+     
+         // create a cell in each row for each column
+        var cells = rows.selectAll("td")
+             .data(function (row) {
+                 return columns.map(function (column) {
+                     return { column: column, value: row[column] };
+                 });
+             })
+             .enter()
+             .append("td")
+             .text(function (d) { return d.value; }
+             )
+             .on("click", function (d) { tableRowClicked(d); }); // added on click eventto td         element NB you need to click on the cell with the conuty name 
+       
+        // add extents (max and min) from data results for choropleth
+        colScale.domain(d3.extent(data, function (d) { return d.Result; } )); 
+
+        //Bind data and create one path per GeoJSON feature
+        g.selectAll("path")
+           .data(json.features)
+           .enter()
+           .append("path")
+           .attr("d", path)
+           .attr("class", "feature")
+           .attr("id", function (d) { return d.properties.lgid; }) // added id so click could work on id which is common between the json and csv data
+           .on("click", function (d) { click(d); })
+           .style("stroke", "white")
+           .style("fill", function (d,i) { return colScale(d.properties.value); }); // fill based on colour scale
+
+        g.append("path")
+           .data(json.features)
+           .enter()
+           .append("path")
+           .attr("class", "mesh")
+           .attr("d", path);
+    });
+
+});
+
+function click(d) {
+
+    if (active === d) return reset();
+   g.selectAll(".active").classed("active", false);
+   d3.select("#"+d.properties.id).classed("active", active = d); // changed selection to id
+   
+   var b = path.bounds(d);
+
+   g.transition().duration(750).attr("transform",
+       "translate(" + projection.translate() + ")"
+       + "scale(" + .15 / Math.max((b[1][0] - b[0][0]) / w, (b[1][1] - b[0][1]) / h) + ")"
+       + "translate(" + -(b[1][0] + b[0][0]) / 2 + "," + -(b[1][1] + b[0][1]) / 2 + ")");
+}
+
+function reset() {
+    g.selectAll(".active").classed("active", active = false);
+    g.transition().duration(750).attr("transform", "");
+}
+
+function tableRowClicked(x) {
+
+    jsonOutside.features.forEach(function (d) { // loop through json data to match td entry
+        if (x.value === d.properties.id) {
+            var county = d;
+            click(d); // pass json element that matches td data to click 
+        };
+    })
+}
+
+</script>
+</body>
+</html>
